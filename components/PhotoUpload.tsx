@@ -50,7 +50,7 @@ export default function PhotoUpload() {
             <input type="file" onChange={handleChange} />
             <button onClick={handleUpload} disabled={!backendUrl}>
                 Upload
-            </button>
+            </button>.github
         </div>
     );
 }

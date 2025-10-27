@@ -1,4 +1,4 @@
-// File: C:\Users\Jorn\Documents\GitHub\Obscura\obscura_frontend\app\photos\page.tsx
+// File: C:\Users\jornb\Documents\Github\Obscura\obscura_frontend\app\photos\page.tsx
 import * as entry from '../../../../app/photos/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
