@@ -21,15 +21,17 @@ jobs:
 
       - name: Set up Node
         uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
       - name: Install dependencies
-        uses: npm install
+        run: npm install
 
       - name: Build frontend
-        uses: npm run build
+        run: npm run build
 
       - name: Run tests
-        uses: npm test
+        run: npm test
 
       - name: Upload build
         if: success()
