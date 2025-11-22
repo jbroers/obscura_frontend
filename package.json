@@ -11,7 +11,9 @@
   "scripts": {
     "dev": "npm install && next dev",
     "start": "npm install && next start",
-    "build": "next build"
+    "build": "next build",
+    "playwright:install": "npx playwright install --with-deps",
+    "test:e2e": "npx playwright test"
   },
   "browserslist": {
     "production": [
@@ -26,6 +28,7 @@
     ]
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@types/node": "^24.8.1",
     "@types/react": "^19.2.2",
     "typescript": "^5.9.3"
