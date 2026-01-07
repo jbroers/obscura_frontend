@@ -21,15 +21,28 @@ jobs:
 
       - name: Set up Node
         uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
       - name: Install dependencies
-        uses: npm install
+        run: npm install
+
+      - name: Run ESLint
+        run: npm run lint
 
       - name: Build frontend
-        uses: npm run build
+        run: npm run build
 
-      - name: Run tests
-        uses: npm test
+      - name: Run Jest unit tests
+        run: npm run test:coverage
+
+      - name: Upload Jest coverage report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-coverage-report
+          path: coverage/
+          retention-days: 30
 
       - name: Upload build
         if: success()

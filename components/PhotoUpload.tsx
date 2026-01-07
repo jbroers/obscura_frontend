@@ -16,15 +16,34 @@ interface ToastMessage {
 export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
     const [file, setFile] = useState<File | null>(null);
     const [backendUrl, setBackendUrl] = useState<string | null>(null);
+    const [maxFileSizeBytes, setMaxFileSizeBytes] = useState<number | null>(null);
     const [uploading, setUploading] = useState(false);
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
     useEffect(() => {
-        fetch('/config.json')
-            .then(res => res.json())
-            .then(data => setBackendUrl(data.backendUrl))
+        fetch('/api/config')
+            .then(res => {
+                if (!res.ok) throw new Error('no-backend-config');
+                return res.json();
+            })
+            .then(data => {
+                if (data.backendUrl) setBackendUrl(data.backendUrl);
+                if (data.maxFileSizeBytes) setMaxFileSizeBytes(Number(data.maxFileSizeBytes));
+            })
             .catch(() => {
-                showToast('Configuratie kon niet worden geladen', 'error');
+                fetch('/config.json')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.backendUrl) setBackendUrl(data.backendUrl);
+                        if (data.maxFileSizeBytes) setMaxFileSizeBytes(Number(data.maxFileSizeBytes));
+                        else if (data.maxFileSize) {
+                            const parsed = parseSizeString(String(data.maxFileSize));
+                            if (parsed) setMaxFileSizeBytes(parsed);
+                        }
+                    })
+                    .catch(() => {
+                        showToast('Configuratie kon niet worden geladen', 'error');
+                    });
             });
     }, []);
 
@@ -37,9 +56,59 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
         setToasts(prev => prev.filter(toast => toast.id !== id));
     };
 
+    function parseSizeString(size: string): number {
+        const m = size.trim().toUpperCase().match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/);
+        if (!m) return 0;
+        const value = parseFloat(m[1]);
+        const unit = m[2] || 'B';
+        switch (unit) {
+            case 'GB': return Math.round(value * 1024 * 1024 * 1024);
+            case 'MB': return Math.round(value * 1024 * 1024);
+            case 'KB': return Math.round(value * 1024);
+            default: return Math.round(value);
+        }
+    }
+
+    const formatBytes = (bytes: number) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B','KB','MB','GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            setFile(e.target.files[0]);
+            const candidate = e.target.files[0];
+
+            const allowedExtensions = [
+                '.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.heic',
+                '.cr3', '.cr2', '.nef', '.arw', '.rw2', '.dng', '.raf', '.orf', '.raw'
+            ];
+
+            const fileName = candidate.name || '';
+            const fileExt = (fileName.substring(fileName.lastIndexOf('.')) || '').toLowerCase();
+            const mime = candidate.type || '';
+
+            const isImageMime = mime.startsWith('image/');
+            const isAllowedExt = allowedExtensions.includes(fileExt);
+
+            if (!isImageMime && !isAllowedExt) {
+                showToast(`Bestandsformaat niet ondersteund: ${fileExt || 'onbekend'}`, 'error');
+                const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
+                if (fileInput) fileInput.value = '';
+                setFile(null);
+                return;
+            }
+
+            if (maxFileSizeBytes && candidate.size > maxFileSizeBytes) {
+                showToast(`Bestand te groot: maximaal ${formatBytes(maxFileSizeBytes)}`, 'error');
+                const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
+                if (fileInput) fileInput.value = '';
+                setFile(null);
+                return;
+            }
+            setFile(candidate);
         }
     };
 
@@ -53,6 +122,14 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
             return;
         }
 
+        if (maxFileSizeBytes && file.size > maxFileSizeBytes) {
+            showToast(`Bestand te groot: maximaal ${formatBytes(maxFileSizeBytes)}`, 'error');
+            const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
+            if (fileInput) fileInput.value = '';
+            setFile(null);
+            return;
+        }
+
         setUploading(true);
         const formData = new FormData();
         formData.append('file', file);
@@ -62,6 +139,18 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                 method: 'POST',
                 body: formData,
             });
+
+            if (res.status === 413) {
+                try {
+                    const json = await res.json();
+                    const message = json?.error ? String(json.error) : 'Upload mislukt: Bestand is te groot';
+                    const max = json?.maxFileSize || (maxFileSizeBytes ? formatBytes(maxFileSizeBytes) : undefined);
+                    showToast(max ? `${message} (max: ${max})` : message, 'error');
+                } catch {
+                    showToast('Upload mislukt: Bestand is te groot', 'error');
+                }
+                return;
+            }
 
             if (!res.ok) {
                 const errorText = await res.text();
@@ -78,8 +167,14 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
 
             const fileInput = document.getElementById('file-input') as HTMLInputElement;
             if (fileInput) fileInput.value = '';
-        } catch (err) {
-            showToast('Upload mislukt: Netwerkfout of server onbereikbaar', 'error');
+        } catch (err: any) {
+            if (maxFileSizeBytes && file.size > maxFileSizeBytes) {
+                showToast(`Upload mislukt: Bestand is te groot (geblokkeerd vóór server). Max: ${formatBytes(maxFileSizeBytes)}`, 'error');
+            } else if (err instanceof TypeError) {
+                showToast('Upload mislukt: Netwerkfout of server onbereikbaar (mogelijk bestand te groot of CORS/timeout).', 'error');
+            } else {
+                showToast('Upload mislukt: Onbekende fout tijdens upload', 'error');
+            }
         } finally {
             setUploading(false);
         }
@@ -92,7 +187,9 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                     <input
                         id="file-input"
                         type="file"
-                        accept="image/*"
+                        accept={
+                            ".jpg,.jpeg,.png,.gif,.tif,.tiff,.heic,.cr3,.cr2,.nef,.arw,.rw2,.dng,.raf,.orf,.raw,image/*"
+                        }
                         onChange={handleChange}
                         style={styles.fileInput}
                     />
@@ -115,6 +212,11 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                             {file ? file.name : 'Kies foto\'s'}
                         </span>
                     </button>
+                    {maxFileSizeBytes && (
+                        <div style={{ color: '#cbd5e1', fontSize: '0.9rem' }}>
+                            Max bestandsgrootte: {formatBytes(maxFileSizeBytes)}
+                        </div>
+                    )}
                     {file && (
                         <button
                             onClick={handleUpload}
@@ -195,4 +297,3 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontWeight: '600',
     },
 };
-
