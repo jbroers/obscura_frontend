@@ -5,19 +5,23 @@
     "strict": true,
     "jsx": "preserve",
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "target": "esnext",
     "lib": [
       "dom",
       "dom.iterable",
       "esnext"
     ],
+    "types": ["jest", "@testing-library/jest-dom", "node"],
     "allowJs": true,
     "skipLibCheck": true,
     "noEmit": true,
     "incremental": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "paths": {
+      "@/*": ["./*"]
+    },
     "plugins": [
       {
         "name": "next"

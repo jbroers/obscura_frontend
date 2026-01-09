@@ -80,7 +80,7 @@ export default function App() {
                         <div style={styles.stepNumber}>1</div>
                         <h3 style={styles.stepTitle}>Upload</h3>
                         <p style={styles.stepDescription}>
-                            Drag & drop je RAW-bestanden of klik om te uploaden. Tot 10 foto's per keer, max 10MB per bestand
+                            Selecteer meerdere RAW-bestanden tegelijk (max 10). Tot 10MB per bestand wordt ondersteund
                         </p>
                     </div>
                     <div style={styles.step}>

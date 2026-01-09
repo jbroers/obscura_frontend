@@ -14,7 +14,7 @@ interface ToastMessage {
 }
 
 export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
-    const [file, setFile] = useState<File | null>(null);
+    const [files, setFiles] = useState<File[]>([]);
     const [backendUrl, setBackendUrl] = useState<string | null>(null);
     const [maxFileSizeBytes, setMaxFileSizeBytes] = useState<number | null>(null);
     const [uploading, setUploading] = useState(false);
@@ -78,37 +78,53 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
     };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const candidate = e.target.files[0];
-
+        if (e.target.files && e.target.files.length > 0) {
+            const selectedFiles = Array.from(e.target.files);
+            const validFiles: File[] = [];
             const allowedExtensions = [
                 '.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.heic',
                 '.cr3', '.cr2', '.nef', '.arw', '.rw2', '.dng', '.raf', '.orf', '.raw'
             ];
 
-            const fileName = candidate.name || '';
-            const fileExt = (fileName.substring(fileName.lastIndexOf('.')) || '').toLowerCase();
-            const mime = candidate.type || '';
-
-            const isImageMime = mime.startsWith('image/');
-            const isAllowedExt = allowedExtensions.includes(fileExt);
-
-            if (!isImageMime && !isAllowedExt) {
-                showToast(`Bestandsformaat niet ondersteund: ${fileExt || 'onbekend'}`, 'error');
+            if (selectedFiles.length > 10) {
+                showToast('Maximaal 10 bestanden tegelijk uploaden', 'error');
                 const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
                 if (fileInput) fileInput.value = '';
-                setFile(null);
                 return;
             }
 
-            if (maxFileSizeBytes && candidate.size > maxFileSizeBytes) {
-                showToast(`Bestand te groot: maximaal ${formatBytes(maxFileSizeBytes)}`, 'error');
+            for (const candidate of selectedFiles) {
+                const fileName = candidate.name || '';
+                const fileExt = (fileName.substring(fileName.lastIndexOf('.')) || '').toLowerCase();
+                const mime = candidate.type || '';
+
+                const isImageMime = mime.startsWith('image/');
+                const isAllowedExt = allowedExtensions.includes(fileExt);
+
+                if (!isImageMime && !isAllowedExt) {
+                    showToast(`Bestand ${fileName}: formaat niet ondersteund`, 'error');
+                    continue;
+                }
+
+                if (maxFileSizeBytes && candidate.size > maxFileSizeBytes) {
+                    showToast(`Bestand ${fileName} te groot: max ${formatBytes(maxFileSizeBytes)}`, 'error');
+                    continue;
+                }
+
+                validFiles.push(candidate);
+            }
+
+            if (validFiles.length === 0) {
                 const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
                 if (fileInput) fileInput.value = '';
-                setFile(null);
+                setFiles([]);
                 return;
             }
-            setFile(candidate);
+
+            setFiles(validFiles);
+            if (validFiles.length < selectedFiles.length) {
+                showToast(`${validFiles.length} van ${selectedFiles.length} bestanden geaccepteerd`, 'warning');
+            }
         }
     };
 
@@ -117,25 +133,20 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
     };
 
     const handleUpload = async () => {
-        if (!file || !backendUrl) {
-            showToast('Geen bestand of backend URL beschikbaar', 'warning');
-            return;
-        }
-
-        if (maxFileSizeBytes && file.size > maxFileSizeBytes) {
-            showToast(`Bestand te groot: maximaal ${formatBytes(maxFileSizeBytes)}`, 'error');
-            const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
-            if (fileInput) fileInput.value = '';
-            setFile(null);
+        if (!files.length || !backendUrl) {
+            showToast('Geen bestanden of backend URL beschikbaar', 'warning');
             return;
         }
 
         setUploading(true);
         const formData = new FormData();
-        formData.append('file', file);
+
+        files.forEach(file => {
+            formData.append('files', file);
+        });
 
         try {
-            const res = await fetch(`${backendUrl}/photos/upload`, {
+            const res = await fetch(`${backendUrl}/photos/upload/batch`, {
                 method: 'POST',
                 body: formData,
             });
@@ -143,11 +154,11 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
             if (res.status === 413) {
                 try {
                     const json = await res.json();
-                    const message = json?.error ? String(json.error) : 'Upload mislukt: Bestand is te groot';
+                    const message = json?.error ? String(json.error) : 'Upload mislukt: Bestanden te groot';
                     const max = json?.maxFileSize || (maxFileSizeBytes ? formatBytes(maxFileSizeBytes) : undefined);
                     showToast(max ? `${message} (max: ${max})` : message, 'error');
                 } catch {
-                    showToast('Upload mislukt: Bestand is te groot', 'error');
+                    showToast('Upload mislukt: Bestanden te groot', 'error');
                 }
                 return;
             }
@@ -158,20 +169,20 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                 return;
             }
 
-            showToast('Foto succesvol geüpload!', 'success');
+            const result = await res.json();
+            const uploadedCount = result.photos?.length || files.length;
+            showToast(`${uploadedCount} foto('s) succesvol geüpload!`, 'success');
 
             if (onUploadSuccess) {
                 onUploadSuccess();
             }
-            setFile(null);
+            setFiles([]);
 
             const fileInput = document.getElementById('file-input') as HTMLInputElement;
             if (fileInput) fileInput.value = '';
         } catch (err: any) {
-            if (maxFileSizeBytes && file.size > maxFileSizeBytes) {
-                showToast(`Upload mislukt: Bestand is te groot (geblokkeerd vóór server). Max: ${formatBytes(maxFileSizeBytes)}`, 'error');
-            } else if (err instanceof TypeError) {
-                showToast('Upload mislukt: Netwerkfout of server onbereikbaar (mogelijk bestand te groot of CORS/timeout).', 'error');
+            if (err instanceof TypeError) {
+                showToast('Upload mislukt: Netwerkfout of server onbereikbaar', 'error');
             } else {
                 showToast('Upload mislukt: Onbekende fout tijdens upload', 'error');
             }
@@ -192,6 +203,7 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                         }
                         onChange={handleChange}
                         style={styles.fileInput}
+                        multiple
                     />
                     <button
                         onClick={handleButtonClick}
@@ -209,22 +221,34 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                             <circle cx="12" cy="13" r="4"/>
                         </svg>
                         <span style={styles.buttonText}>
-                            {file ? file.name : 'Kies foto\'s'}
+                            {files.length > 0
+                                ? `${files.length} foto${files.length > 1 ? "'s" : ''} geselecteerd`
+                                : 'Kies foto\'s (max 10)'}
                         </span>
                     </button>
                     {maxFileSizeBytes && (
-                        <div style={{ color: '#cbd5e1', fontSize: '0.9rem' }}>
-                            Max bestandsgrootte: {formatBytes(maxFileSizeBytes)}
+                        <div style={{ color: '#cbd5e1', fontSize: '0.9rem', textAlign: 'center' }}>
+                            Max bestandsgrootte: {formatBytes(maxFileSizeBytes)} per foto
                         </div>
                     )}
-                    {file && (
-                        <button
-                            onClick={handleUpload}
-                            style={styles.submitButton}
-                            disabled={uploading || !backendUrl}
-                        >
-                            {uploading ? 'Uploaden...' : 'Upload'}
-                        </button>
+                    {files.length > 0 && (
+                        <>
+                            <div style={styles.fileList}>
+                                {files.map((f, idx) => (
+                                    <div key={`${f.name}-${idx}`} style={styles.fileName}>
+                                        <i className="bi bi-file-earmark-image" style={{ marginRight: '0.5rem' }}></i>
+                                        {f.name} ({formatBytes(f.size)})
+                                    </div>
+                                ))}
+                            </div>
+                            <button
+                                onClick={handleUpload}
+                                style={styles.submitButton}
+                                disabled={uploading || !backendUrl}
+                            >
+                                {uploading ? 'Uploaden...' : `Upload ${files.length} foto${files.length > 1 ? "'s" : ''}`}
+                            </button>
+                        </>
                     )}
                 </div>
             </div>
@@ -295,5 +319,21 @@ const styles: { [key: string]: React.CSSProperties } = {
         cursor: 'pointer',
         transition: 'background-color 0.3s ease',
         fontWeight: '600',
+    },
+    fileList: {
+        width: '100%',
+        maxHeight: '200px',
+        overflowY: 'auto',
+        backgroundColor: '#1a2332',
+        borderRadius: '6px',
+        padding: '1rem',
+    },
+    fileName: {
+        color: '#e0e6ed',
+        fontSize: '0.9rem',
+        padding: '0.5rem',
+        borderBottom: '1px solid #2a3847',
+        display: 'flex',
+        alignItems: 'center',
     },
 };
