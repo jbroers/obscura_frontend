@@ -81,10 +81,11 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
         if (e.target.files && e.target.files.length > 0) {
             const selectedFiles = Array.from(e.target.files);
             const validFiles: File[] = [];
-            const allowedExtensions = [
-                '.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.heic',
-                '.cr3', '.cr2', '.nef', '.arw', '.rw2', '.dng', '.raf', '.orf', '.raw'
-            ];
+
+            const allowedExtensions = ['.jpg', '.jpeg', '.cr2', '.cr3', '.nef'];
+
+            const MAX_FILE_SIZE = 100 * 1024 * 1024;
+            const MAX_TOTAL_SIZE = 1000 * 1024 * 1024;
 
             if (selectedFiles.length > 10) {
                 showToast('Maximaal 10 bestanden tegelijk uploaden', 'error');
@@ -93,25 +94,31 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                 return;
             }
 
+            let totalSize = 0;
+
             for (const candidate of selectedFiles) {
                 const fileName = candidate.name || '';
                 const fileExt = (fileName.substring(fileName.lastIndexOf('.')) || '').toLowerCase();
-                const mime = candidate.type || '';
 
-                const isImageMime = mime.startsWith('image/');
-                const isAllowedExt = allowedExtensions.includes(fileExt);
-
-                if (!isImageMime && !isAllowedExt) {
-                    showToast(`Bestand ${fileName}: formaat niet ondersteund`, 'error');
+                if (!allowedExtensions.includes(fileExt)) {
+                    showToast(`${fileName}: Alleen .jpg, .jpeg, .cr2, .cr3, .nef ondersteund`, 'error');
                     continue;
                 }
 
-                if (maxFileSizeBytes && candidate.size > maxFileSizeBytes) {
-                    showToast(`Bestand ${fileName} te groot: max ${formatBytes(maxFileSizeBytes)}`, 'error');
+                if (candidate.size > MAX_FILE_SIZE) {
+                    showToast(`${fileName} te groot: max ${formatBytes(MAX_FILE_SIZE)}`, 'error');
                     continue;
                 }
 
+                totalSize += candidate.size;
                 validFiles.push(candidate);
+            }
+
+            if (totalSize > MAX_TOTAL_SIZE) {
+                showToast(`Totale grootte ${formatBytes(totalSize)} overschrijdt limiet van ${formatBytes(MAX_TOTAL_SIZE)}`, 'error');
+                const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
+                if (fileInput) fileInput.value = '';
+                return;
             }
 
             if (validFiles.length === 0) {
@@ -152,30 +159,82 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
             });
 
             if (res.status === 413) {
-                try {
-                    const json = await res.json();
-                    const message = json?.error ? String(json.error) : 'Upload mislukt: Bestanden te groot';
-                    const max = json?.maxFileSize || (maxFileSizeBytes ? formatBytes(maxFileSizeBytes) : undefined);
-                    showToast(max ? `${message} (max: ${max})` : message, 'error');
-                } catch {
-                    showToast('Upload mislukt: Bestanden te groot', 'error');
-                }
+                showToast('Upload mislukt: Totale grootte overschrijdt 1GB limiet', 'error');
                 return;
             }
 
             if (!res.ok) {
-                const errorText = await res.text();
-                showToast(`Upload mislukt: ${errorText || 'Onbekende fout'}`, 'error');
+                try {
+                    const result = await res.json();
+
+                    if (result.duplicateCount > 0 && result.successCount === 0 && result.failureCount === 0) {
+                        const duplicateNames = result.duplicates || [];
+                        if (duplicateNames.length <= 3) {
+                            showToast(
+                                `Alle ${result.duplicateCount} foto('s) waren al geüpload: ${duplicateNames.join(', ')}`,
+                                'info'
+                            );
+                        } else {
+                            showToast(
+                                `Alle ${result.duplicateCount} foto('s) waren al geüpload (bijv. ${duplicateNames.slice(0, 2).join(', ')}...)`,
+                                'info'
+                            );
+                        }
+                        setFiles([]);
+                        const fileInput = document.getElementById('file-input') as HTMLInputElement;
+                        if (fileInput) fileInput.value = '';
+                        return;
+                    }
+
+                    showToast(`Upload mislukt: ${result.message || 'Onbekende fout'}`, 'error');
+                } catch {
+                    const errorText = await res.text().catch(() => 'Onbekende fout');
+                    showToast(`Upload mislukt: ${errorText}`, 'error');
+                }
                 return;
             }
 
             const result = await res.json();
-            const uploadedCount = result.photos?.length || files.length;
-            showToast(`${uploadedCount} foto('s) succesvol geüpload!`, 'success');
 
-            if (onUploadSuccess) {
+            if (result.successCount > 0) {
+                showToast(`${result.successCount} foto('s) succesvol geüpload!`, 'success');
+            }
+
+            if (result.duplicateCount > 0) {
+                const duplicateNames = result.duplicates || [];
+                if (duplicateNames.length <= 3) {
+                    showToast(
+                        `${result.duplicateCount} duplicaten overgeslagen: ${duplicateNames.join(', ')}`,
+                        'warning'
+                    );
+                } else {
+                    showToast(
+                        `${result.duplicateCount} duplicaten overgeslagen (bijv. ${duplicateNames.slice(0, 2).join(', ')}...)`,
+                        'warning'
+                    );
+                }
+            }
+
+            if (result.failureCount > 0) {
+                const failures = result.failed || [];
+                failures.slice(0, 3).forEach((failure: any) => {
+                    showToast(`${failure.filename || failure.fileName}: ${failure.error}`, 'error');
+                });
+                if (result.failureCount > 3) {
+                    showToast(`En ${result.failureCount - 3} andere fouten`, 'error');
+                }
+            }
+
+            if (result.successCount === 0 && result.totalFiles > 0) {
+                if (result.duplicateCount === result.totalFiles) {
+                    showToast('Alle foto\'s waren al geüpload', 'info');
+                }
+            }
+
+            if (result.successCount > 0 && onUploadSuccess) {
                 onUploadSuccess();
             }
+
             setFiles([]);
 
             const fileInput = document.getElementById('file-input') as HTMLInputElement;
@@ -198,9 +257,7 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                     <input
                         id="file-input"
                         type="file"
-                        accept={
-                            ".jpg,.jpeg,.png,.gif,.tif,.tiff,.heic,.cr3,.cr2,.nef,.arw,.rw2,.dng,.raf,.orf,.raw,image/*"
-                        }
+                        accept=".jpg,.jpeg,.cr2,.cr3,.nef,image/jpeg"
                         onChange={handleChange}
                         style={styles.fileInput}
                         multiple
@@ -226,11 +283,9 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                                 : 'Kies foto\'s (max 10)'}
                         </span>
                     </button>
-                    {maxFileSizeBytes && (
-                        <div style={{ color: '#cbd5e1', fontSize: '0.9rem', textAlign: 'center' }}>
-                            Max bestandsgrootte: {formatBytes(maxFileSizeBytes)} per foto
-                        </div>
-                    )}
+                    <div style={{ color: '#cbd5e1', fontSize: '0.9rem', textAlign: 'center' }}>
+                        Max 100MB per foto • Max 1GB totaal
+                    </div>
                     {files.length > 0 && (
                         <>
                             <div style={styles.fileList}>

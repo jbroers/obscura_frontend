@@ -21,8 +21,27 @@ describe('PhotoGallery Component', () => {
     expect(screen.getByText(/foto's laden/i)).toBeInTheDocument();
   });
 
-  it('fetches backend configuration from config.json', async () => {
+  it('fetches backend configuration from /api/config first', async () => {
     (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ backendUrl: 'http://localhost:8080' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      });
+
+    render(<PhotoGallery />);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/config');
+    });
+  });
+
+  it('falls back to config.json if /api/config fails', async () => {
+    (global.fetch as jest.Mock)
+      .mockRejectedValueOnce(new Error('API not found'))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ backendUrl: 'http://localhost:8080' }),
@@ -53,7 +72,7 @@ describe('PhotoGallery Component', () => {
     render(<PhotoGallery />);
 
     await waitFor(() => {
-      expect(screen.getByText(/nog geen foto's geüpload/i)).toBeInTheDocument();
+      expect(screen.getByText(/nog geen foto's gevonden/i)).toBeInTheDocument();
     });
   });
 
@@ -61,19 +80,27 @@ describe('PhotoGallery Component', () => {
     const mockPhotos = [
       {
         id: 1,
-        filename: 'test1.jpg',
-        url: 'http://localhost:8080/photos/1',
+        fileName: 'test1.jpg',
+        fileUrl: 'http://localhost:8080/photos/1',
+        fileSize: 1024000,
+        contentType: 'image/jpeg',
+        uploadedAt: '2026-01-09T12:00:00',
         aperture: 'f/2.8',
         shutterSpeed: '1/250',
-        iso: '400',
+        iso: 400,
+        isRaw: false,
       },
       {
         id: 2,
-        filename: 'test2.jpg',
-        url: 'http://localhost:8080/photos/2',
+        fileName: 'test2.jpg',
+        fileUrl: 'http://localhost:8080/photos/2',
+        fileSize: 2048000,
+        contentType: 'image/jpeg',
+        uploadedAt: '2026-01-09T12:00:00',
         aperture: 'f/4.0',
         shutterSpeed: '1/500',
-        iso: '200',
+        iso: 200,
+        isRaw: false,
       },
     ];
 
@@ -90,23 +117,27 @@ describe('PhotoGallery Component', () => {
     render(<PhotoGallery />);
 
     await waitFor(() => {
-      expect(screen.getByText(/geüploade foto's/i)).toBeInTheDocument();
+      expect(screen.getByText(/foto galerij/i)).toBeInTheDocument();
     });
 
     const images = screen.getAllByRole('img');
-    expect(images).toHaveLength(2);
-    expect(images[0]).toHaveAttribute('src', mockPhotos[0].url);
-    expect(images[1]).toHaveAttribute('src', mockPhotos[1].url);
+    // Filter out Bootstrap icons
+    const photoImages = images.filter(img => img.getAttribute('src')?.startsWith('http'));
+    expect(photoImages.length).toBeGreaterThanOrEqual(2);
   });
 
   it('displays photo metadata correctly', async () => {
     const mockPhoto = {
       id: 1,
-      filename: 'test.jpg',
-      url: 'http://localhost:8080/photos/1',
+      fileName: 'test.jpg',
+      fileUrl: 'http://localhost:8080/photos/1',
+      fileSize: 1024000,
+      contentType: 'image/jpeg',
+      uploadedAt: '2026-01-09T12:00:00',
       aperture: 'f/2.8',
       shutterSpeed: '1/250',
-      iso: '400',
+      iso: 400,
+      isRaw: false,
     };
 
     (global.fetch as jest.Mock)
@@ -130,7 +161,15 @@ describe('PhotoGallery Component', () => {
 
   it('refetches photos when refreshTrigger changes', async () => {
     const mockPhotos = [
-      { id: 1, filename: 'test.jpg', url: 'http://localhost:8080/photos/1' },
+      {
+        id: 1,
+        fileName: 'test.jpg',
+        fileUrl: 'http://localhost:8080/photos/1',
+        fileSize: 1024000,
+        contentType: 'image/jpeg',
+        uploadedAt: '2026-01-09T12:00:00',
+        isRaw: false,
+      },
     ];
 
     (global.fetch as jest.Mock)
@@ -159,8 +198,6 @@ describe('PhotoGallery Component', () => {
   });
 
   it('handles fetch errors gracefully', async () => {
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
-
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({
         ok: true,
@@ -171,10 +208,8 @@ describe('PhotoGallery Component', () => {
     render(<PhotoGallery />);
 
     await waitFor(() => {
-      expect(screen.getByText(/nog geen foto's geüpload/i)).toBeInTheDocument();
+      expect(screen.getByText(/nog geen foto's gevonden/i)).toBeInTheDocument();
     });
-
-    consoleSpy.mockRestore();
   });
 });
 

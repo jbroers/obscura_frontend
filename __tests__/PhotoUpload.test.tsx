@@ -73,8 +73,9 @@ describe('PhotoUpload Component', () => {
       const acceptAttr = fileInput.getAttribute('accept');
 
       expect(acceptAttr).toContain('.jpg');
-      expect(acceptAttr).toContain('.png');
+      expect(acceptAttr).toContain('.jpeg');
       expect(acceptAttr).toContain('.cr2');
+      expect(acceptAttr).toContain('.cr3');
       expect(acceptAttr).toContain('.nef');
     });
   });
@@ -91,8 +92,17 @@ describe('PhotoUpload Component', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          message: 'Successfully uploaded 3 photo(s)',
-          photos: [{}, {}, {}]
+          totalFiles: 3,
+          successCount: 3,
+          failureCount: 0,
+          duplicateCount: 0,
+          successful: [
+            { id: 1, fileName: 'test1.jpg' },
+            { id: 2, fileName: 'test2.jpg' },
+            { id: 3, fileName: 'test3.jpg' }
+          ],
+          failed: [],
+          duplicates: []
         }),
       });
 
