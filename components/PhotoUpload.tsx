@@ -13,10 +13,25 @@ interface ToastMessage {
     id: number;
 }
 
-export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
+function parseSizeString(size: string): number {
+    const regex = /^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/;
+    const m = regex.exec(size.trim().toUpperCase());
+    if (!m) return 0;
+    const value = Number.parseFloat(m[1]);
+    const unit = m[2] || 'B';
+    switch (unit) {
+        case 'GB': return Math.round(value * 1024 * 1024 * 1024);
+        case 'MB': return Math.round(value * 1024 * 1024);
+        case 'KB': return Math.round(value * 1024);
+        default: return Math.round(value);
+    }
+}
+
+const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.cr2', '.cr3', '.nef']);
+
+export default function PhotoUpload({ onUploadSuccess }: Readonly<PhotoUploadProps>) {
     const [files, setFiles] = useState<File[]>([]);
     const [backendUrl, setBackendUrl] = useState<string | null>(null);
-    const [maxFileSizeBytes, setMaxFileSizeBytes] = useState<number | null>(null);
     const [uploading, setUploading] = useState(false);
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
@@ -28,18 +43,12 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
             })
             .then(data => {
                 if (data.backendUrl) setBackendUrl(data.backendUrl);
-                if (data.maxFileSizeBytes) setMaxFileSizeBytes(Number(data.maxFileSizeBytes));
             })
             .catch(() => {
                 fetch('/config.json')
                     .then(res => res.json())
                     .then(data => {
                         if (data.backendUrl) setBackendUrl(data.backendUrl);
-                        if (data.maxFileSizeBytes) setMaxFileSizeBytes(Number(data.maxFileSizeBytes));
-                        else if (data.maxFileSize) {
-                            const parsed = parseSizeString(String(data.maxFileSize));
-                            if (parsed) setMaxFileSizeBytes(parsed);
-                        }
                     })
                     .catch(() => {
                         showToast('Configuratie kon niet worden geladen', 'error');
@@ -56,87 +65,183 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
         setToasts(prev => prev.filter(toast => toast.id !== id));
     };
 
-    function parseSizeString(size: string): number {
-        const m = size.trim().toUpperCase().match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/);
-        if (!m) return 0;
-        const value = parseFloat(m[1]);
-        const unit = m[2] || 'B';
-        switch (unit) {
-            case 'GB': return Math.round(value * 1024 * 1024 * 1024);
-            case 'MB': return Math.round(value * 1024 * 1024);
-            case 'KB': return Math.round(value * 1024);
-            default: return Math.round(value);
-        }
-    }
-
     const formatBytes = (bytes: number) => {
         if (bytes === 0) return '0 B';
         const k = 1024;
         const sizes = ['B','KB','MB','GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    const getPhotoSuffix = (count: number): string => {
+        return count > 1 ? "'s" : '';
+    };
+
+    const clearFileInput = () => {
+        const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
+        if (fileInput) fileInput.value = '';
+    };
+
+    const validateFileExtension = (file: File): boolean => {
+        const fileName = file.name || '';
+        const fileExt = (fileName.substring(fileName.lastIndexOf('.')) || '').toLowerCase();
+        return ALLOWED_EXTENSIONS.has(fileExt);
+    };
+
+    const validateFileSize = (file: File, maxSize: number): boolean => {
+        return file.size <= maxSize;
+    };
+
+    const processSelectedFiles = (selectedFiles: File[]): { validFiles: File[], totalSize: number } => {
+        const validFiles: File[] = [];
+        let totalSize = 0;
+        const MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+        for (const candidate of selectedFiles) {
+            if (!validateFileExtension(candidate)) {
+                showToast(`${candidate.name}: Alleen .jpg, .jpeg, .cr2, .cr3, .nef ondersteund`, 'error');
+                continue;
+            }
+
+            if (!validateFileSize(candidate, MAX_FILE_SIZE)) {
+                showToast(`${candidate.name} te groot: max ${formatBytes(MAX_FILE_SIZE)}`, 'error');
+                continue;
+            }
+
+            totalSize += candidate.size;
+            validFiles.push(candidate);
+        }
+
+        return { validFiles, totalSize };
     };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files.length > 0) {
-            const selectedFiles = Array.from(e.target.files);
-            const validFiles: File[] = [];
+        if (!e.target.files || e.target.files.length === 0) return;
 
-            const allowedExtensions = ['.jpg', '.jpeg', '.cr2', '.cr3', '.nef'];
+        const selectedFiles = Array.from(e.target.files);
+        const MAX_TOTAL_SIZE = 1000 * 1024 * 1024;
 
-            const MAX_FILE_SIZE = 100 * 1024 * 1024;
-            const MAX_TOTAL_SIZE = 1000 * 1024 * 1024;
+        if (selectedFiles.length > 10) {
+            showToast('Maximaal 10 bestanden tegelijk uploaden', 'error');
+            clearFileInput();
+            return;
+        }
 
-            if (selectedFiles.length > 10) {
-                showToast('Maximaal 10 bestanden tegelijk uploaden', 'error');
-                const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
-                if (fileInput) fileInput.value = '';
-                return;
-            }
+        const { validFiles, totalSize } = processSelectedFiles(selectedFiles);
 
-            let totalSize = 0;
+        if (totalSize > MAX_TOTAL_SIZE) {
+            showToast(`Totale grootte ${formatBytes(totalSize)} overschrijdt limiet van ${formatBytes(MAX_TOTAL_SIZE)}`, 'error');
+            clearFileInput();
+            return;
+        }
 
-            for (const candidate of selectedFiles) {
-                const fileName = candidate.name || '';
-                const fileExt = (fileName.substring(fileName.lastIndexOf('.')) || '').toLowerCase();
+        if (validFiles.length === 0) {
+            clearFileInput();
+            setFiles([]);
+            return;
+        }
 
-                if (!allowedExtensions.includes(fileExt)) {
-                    showToast(`${fileName}: Alleen .jpg, .jpeg, .cr2, .cr3, .nef ondersteund`, 'error');
-                    continue;
-                }
-
-                if (candidate.size > MAX_FILE_SIZE) {
-                    showToast(`${fileName} te groot: max ${formatBytes(MAX_FILE_SIZE)}`, 'error');
-                    continue;
-                }
-
-                totalSize += candidate.size;
-                validFiles.push(candidate);
-            }
-
-            if (totalSize > MAX_TOTAL_SIZE) {
-                showToast(`Totale grootte ${formatBytes(totalSize)} overschrijdt limiet van ${formatBytes(MAX_TOTAL_SIZE)}`, 'error');
-                const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
-                if (fileInput) fileInput.value = '';
-                return;
-            }
-
-            if (validFiles.length === 0) {
-                const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
-                if (fileInput) fileInput.value = '';
-                setFiles([]);
-                return;
-            }
-
-            setFiles(validFiles);
-            if (validFiles.length < selectedFiles.length) {
-                showToast(`${validFiles.length} van ${selectedFiles.length} bestanden geaccepteerd`, 'warning');
-            }
+        setFiles(validFiles);
+        if (validFiles.length < selectedFiles.length) {
+            showToast(`${validFiles.length} van ${selectedFiles.length} bestanden geaccepteerd`, 'warning');
         }
     };
 
     const handleButtonClick = () => {
         document.getElementById('file-input')?.click();
+    };
+
+    const resetFileInputAndState = () => {
+        setFiles([]);
+        clearFileInput();
+    };
+
+    const showDuplicateMessage = (duplicateCount: number, duplicateNames: string[]) => {
+        if (duplicateNames.length <= 3) {
+            showToast(
+                `${duplicateCount} duplicaten overgeslagen: ${duplicateNames.join(', ')}`,
+                'warning'
+            );
+        } else {
+            showToast(
+                `${duplicateCount} duplicaten overgeslagen (bijv. ${duplicateNames.slice(0, 2).join(', ')}...)`,
+                'warning'
+            );
+        }
+    };
+
+    const handleAllDuplicates = (result: {duplicateCount: number, duplicates?: string[]}) => {
+        const duplicateNames = result.duplicates || [];
+        if (duplicateNames.length <= 3) {
+            showToast(
+                `Alle ${result.duplicateCount} foto('s) waren al geüpload: ${duplicateNames.join(', ')}`,
+                'info'
+            );
+        } else {
+            showToast(
+                `Alle ${result.duplicateCount} foto('s) waren al geüpload (bijv. ${duplicateNames.slice(0, 2).join(', ')}...)`,
+                'info'
+            );
+        }
+        resetFileInputAndState();
+    };
+
+    const handleUploadErrors = async (res: Response) => {
+        try {
+            const result = await res.json();
+
+            if (result.duplicateCount > 0 && result.successCount === 0 && result.failureCount === 0) {
+                handleAllDuplicates(result);
+                return;
+            }
+
+            showToast(`Upload mislukt: ${result.message || 'Onbekende fout'}`, 'error');
+        } catch {
+            const errorText = await res.text().catch(() => 'Onbekende fout');
+            showToast(`Upload mislukt: ${errorText}`, 'error');
+        }
+    };
+
+    const handleFailures = (failureCount: number, failures: {filename?: string, fileName?: string, error: string}[]) => {
+        failures.slice(0, 3).forEach((failure) => {
+            showToast(`${failure.filename || failure.fileName}: ${failure.error}`, 'error');
+        });
+        if (failureCount > 3) {
+            showToast(`En ${failureCount - 3} andere fouten`, 'error');
+        }
+    };
+
+    const processUploadResult = (result: {
+        successCount: number,
+        duplicateCount?: number,
+        duplicates?: string[],
+        failureCount?: number,
+        failed?: {filename?: string, fileName?: string, error: string}[],
+        totalFiles?: number
+    }) => {
+        if (result.successCount > 0) {
+            showToast(`${result.successCount} foto('s) succesvol geüpload!`, 'success');
+        }
+
+        if (result.duplicateCount && result.duplicateCount > 0) {
+            showDuplicateMessage(result.duplicateCount, result.duplicates || []);
+        }
+
+        if (result.failureCount && result.failureCount > 0) {
+            handleFailures(result.failureCount, result.failed || []);
+        }
+
+        if (result.successCount === 0 && result.totalFiles && result.totalFiles > 0) {
+            if (result.duplicateCount === result.totalFiles) {
+                showToast('Alle foto\'s waren al geüpload', 'info');
+            }
+        }
+
+        if (result.successCount > 0 && onUploadSuccess) {
+            onUploadSuccess();
+        }
+
+        resetFileInputAndState();
     };
 
     const handleUpload = async () => {
@@ -164,82 +269,13 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
             }
 
             if (!res.ok) {
-                try {
-                    const result = await res.json();
-
-                    if (result.duplicateCount > 0 && result.successCount === 0 && result.failureCount === 0) {
-                        const duplicateNames = result.duplicates || [];
-                        if (duplicateNames.length <= 3) {
-                            showToast(
-                                `Alle ${result.duplicateCount} foto('s) waren al geüpload: ${duplicateNames.join(', ')}`,
-                                'info'
-                            );
-                        } else {
-                            showToast(
-                                `Alle ${result.duplicateCount} foto('s) waren al geüpload (bijv. ${duplicateNames.slice(0, 2).join(', ')}...)`,
-                                'info'
-                            );
-                        }
-                        setFiles([]);
-                        const fileInput = document.getElementById('file-input') as HTMLInputElement;
-                        if (fileInput) fileInput.value = '';
-                        return;
-                    }
-
-                    showToast(`Upload mislukt: ${result.message || 'Onbekende fout'}`, 'error');
-                } catch {
-                    const errorText = await res.text().catch(() => 'Onbekende fout');
-                    showToast(`Upload mislukt: ${errorText}`, 'error');
-                }
+                await handleUploadErrors(res);
                 return;
             }
 
             const result = await res.json();
-
-            if (result.successCount > 0) {
-                showToast(`${result.successCount} foto('s) succesvol geüpload!`, 'success');
-            }
-
-            if (result.duplicateCount > 0) {
-                const duplicateNames = result.duplicates || [];
-                if (duplicateNames.length <= 3) {
-                    showToast(
-                        `${result.duplicateCount} duplicaten overgeslagen: ${duplicateNames.join(', ')}`,
-                        'warning'
-                    );
-                } else {
-                    showToast(
-                        `${result.duplicateCount} duplicaten overgeslagen (bijv. ${duplicateNames.slice(0, 2).join(', ')}...)`,
-                        'warning'
-                    );
-                }
-            }
-
-            if (result.failureCount > 0) {
-                const failures = result.failed || [];
-                failures.slice(0, 3).forEach((failure: any) => {
-                    showToast(`${failure.filename || failure.fileName}: ${failure.error}`, 'error');
-                });
-                if (result.failureCount > 3) {
-                    showToast(`En ${result.failureCount - 3} andere fouten`, 'error');
-                }
-            }
-
-            if (result.successCount === 0 && result.totalFiles > 0) {
-                if (result.duplicateCount === result.totalFiles) {
-                    showToast('Alle foto\'s waren al geüpload', 'info');
-                }
-            }
-
-            if (result.successCount > 0 && onUploadSuccess) {
-                onUploadSuccess();
-            }
-
-            setFiles([]);
-
-            const fileInput = document.getElementById('file-input') as HTMLInputElement;
-            if (fileInput) fileInput.value = '';
-        } catch (err: any) {
+            processUploadResult(result);
+        } catch (err) {
             if (err instanceof TypeError) {
                 showToast('Upload mislukt: Netwerkfout of server onbereikbaar', 'error');
             } else {
@@ -279,7 +315,7 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                         </svg>
                         <span style={styles.buttonText}>
                             {files.length > 0
-                                ? `${files.length} foto${files.length > 1 ? "'s" : ''} geselecteerd`
+                                ? `${files.length} foto${getPhotoSuffix(files.length)} geselecteerd`
                                 : 'Kies foto\'s (max 10)'}
                         </span>
                     </button>
@@ -301,7 +337,7 @@ export default function PhotoUpload({ onUploadSuccess }: PhotoUploadProps) {
                                 style={styles.submitButton}
                                 disabled={uploading || !backendUrl}
                             >
-                                {uploading ? 'Uploaden...' : `Upload ${files.length} foto${files.length > 1 ? "'s" : ''}`}
+                                {uploading ? 'Uploaden...' : `Upload ${files.length} foto${getPhotoSuffix(files.length)}`}
                             </button>
                         </>
                     )}

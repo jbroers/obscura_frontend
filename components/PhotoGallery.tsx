@@ -45,7 +45,7 @@ interface ToastMessage {
 }
 
 
-export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
+export default function PhotoGallery({ refreshTrigger }: Readonly<PhotoGalleryProps>) {
     const [photos, setPhotos] = useState<PhotoMetadataDto[]>([]);
     const [filteredPhotos, setFilteredPhotos] = useState<PhotoMetadataDto[]>([]);
     const [backendUrl, setBackendUrl] = useState<string | null>(null);
@@ -103,8 +103,8 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
             }
         };
 
-        window.addEventListener('keydown', handleEscape);
-        return () => window.removeEventListener('keydown', handleEscape);
+        globalThis.addEventListener('keydown', handleEscape);
+        return () => globalThis.removeEventListener('keydown', handleEscape);
     }, [lightboxPhoto]);
 
     const showToast = (message: string, type: ToastType) => {
@@ -167,39 +167,33 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
         }
     };
 
+    const matchesTextFilter = (value: string | undefined, filterValue: string): boolean => {
+        return !filterValue || (value?.toLowerCase().includes(filterValue.toLowerCase()) ?? false);
+    };
+
+    const matchesDateRange = (photo: PhotoMetadataDto): boolean => {
+        if (!photo.dateTaken) return true;
+
+        const photoDate = new Date(photo.dateTaken);
+
+        if (filters.startDate && photoDate < new Date(filters.startDate)) {
+            return false;
+        }
+
+        if (filters.endDate && photoDate > new Date(filters.endDate)) {
+            return false;
+        }
+
+        return true;
+    };
+
     const applyClientSideFilters = (photosList: PhotoMetadataDto[]): PhotoMetadataDto[] => {
         return photosList.filter(photo => {
-            if (filters.make && !photo.cameraMake?.toLowerCase().includes(filters.make.toLowerCase())) {
-                return false;
-            }
-
-            if (filters.model && !photo.cameraModel?.toLowerCase().includes(filters.model.toLowerCase())) {
-                return false;
-            }
-
-            if (filters.lens && !photo.lensModel?.toLowerCase().includes(filters.lens.toLowerCase())) {
-                return false;
-            }
-
-            if (filters.isRaw !== undefined && photo.isRaw !== filters.isRaw) {
-                return false;
-            }
-
-            if (filters.startDate && photo.dateTaken) {
-                const photoDate = new Date(photo.dateTaken);
-                const startDate = new Date(filters.startDate);
-                if (photoDate < startDate) {
-                    return false;
-                }
-            }
-
-            if (filters.endDate && photo.dateTaken) {
-                const photoDate = new Date(photo.dateTaken);
-                const endDate = new Date(filters.endDate);
-                if (photoDate > endDate) {
-                    return false;
-                }
-            }
+            if (!matchesTextFilter(photo.cameraMake, filters.make || '')) return false;
+            if (!matchesTextFilter(photo.cameraModel, filters.model || '')) return false;
+            if (!matchesTextFilter(photo.lensModel, filters.lens || '')) return false;
+            if (filters.isRaw !== undefined && photo.isRaw !== filters.isRaw) return false;
+            if (!matchesDateRange(photo)) return false;
 
             return true;
         });
@@ -285,11 +279,11 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
     };
 
     const formatBytes = (bytes: number | undefined) => {
-        if (!bytes || bytes === 0 || isNaN(bytes)) return 'Onbekend';
+        if (!bytes || bytes === 0 || Number.isNaN(bytes)) return 'Onbekend';
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
     const formatDate = (dateString?: string) => {
@@ -365,10 +359,11 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                     <div style={styles.filterPanel}>
                         <div style={styles.filterGrid}>
                             <div style={styles.filterItem}>
-                                <label style={styles.filterLabel}>
+                                <label htmlFor="filter-make" style={styles.filterLabel}>
                                     <i className="bi bi-camera"></i> Camera Merk
                                 </label>
                                 <select
+                                    id="filter-make"
                                     value={filters.make || ''}
                                     onChange={e => setFilters({...filters, make: e.target.value || undefined})}
                                     style={styles.filterSelect}
@@ -381,10 +376,11 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                             </div>
 
                             <div style={styles.filterItem}>
-                                <label style={styles.filterLabel}>
+                                <label htmlFor="filter-model" style={styles.filterLabel}>
                                     <i className="bi bi-camera2"></i> Camera Model
                                 </label>
                                 <select
+                                    id="filter-model"
                                     value={filters.model || ''}
                                     onChange={e => setFilters({...filters, model: e.target.value || undefined})}
                                     style={styles.filterSelect}
@@ -397,10 +393,11 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                             </div>
 
                             <div style={styles.filterItem}>
-                                <label style={styles.filterLabel}>
+                                <label htmlFor="filter-lens" style={styles.filterLabel}>
                                     <i className="bi bi-circle"></i> Lens
                                 </label>
                                 <select
+                                    id="filter-lens"
                                     value={filters.lens || ''}
                                     onChange={e => setFilters({...filters, lens: e.target.value || undefined})}
                                     style={styles.filterSelect}
@@ -413,10 +410,11 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                             </div>
 
                             <div style={styles.filterItem}>
-                                <label style={styles.filterLabel}>
+                                <label htmlFor="filter-type" style={styles.filterLabel}>
                                     <i className="bi bi-file-earmark-image"></i> Type
                                 </label>
                                 <select
+                                    id="filter-type"
                                     value={filters.isRaw === undefined ? '' : String(filters.isRaw)}
                                     onChange={e => setFilters({...filters, isRaw: e.target.value === '' ? undefined : e.target.value === 'true'})}
                                     style={styles.filterSelect}
@@ -428,10 +426,11 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                             </div>
 
                             <div style={styles.filterItem}>
-                                <label style={styles.filterLabel}>
+                                <label htmlFor="filter-start-date" style={styles.filterLabel}>
                                     <i className="bi bi-calendar-range"></i> Van Datum
                                 </label>
                                 <input
+                                    id="filter-start-date"
                                     type="datetime-local"
                                     value={filters.startDate || ''}
                                     onChange={e => setFilters({...filters, startDate: e.target.value || undefined})}
@@ -440,10 +439,11 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                             </div>
 
                             <div style={styles.filterItem}>
-                                <label style={styles.filterLabel}>
+                                <label htmlFor="filter-end-date" style={styles.filterLabel}>
                                     <i className="bi bi-calendar-check"></i> Tot Datum
                                 </label>
                                 <input
+                                    id="filter-end-date"
                                     type="datetime-local"
                                     value={filters.endDate || ''}
                                     onChange={e => setFilters({...filters, endDate: e.target.value || undefined})}
@@ -492,21 +492,38 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                                     ...(selectedPhotos.includes(photo.id) ? styles.photoCardSelected : {})
                                 }}
                             >
-                                <div
+                                <button
                                     style={styles.selectOverlay}
                                     onClick={() => togglePhotoSelection(photo.id)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            togglePhotoSelection(photo.id);
+                                        }
+                                    }}
+                                    aria-label="Selecteer foto"
+                                    type="button"
                                 >
                                     <input
                                         type="checkbox"
                                         checked={selectedPhotos.includes(photo.id)}
                                         onChange={() => {}}
                                         style={styles.checkbox}
+                                        tabIndex={-1}
                                     />
-                                </div>
+                                </button>
 
-                                <div
+                                <button
                                     style={styles.imageContainer}
                                     onClick={() => setLightboxPhoto(photo)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            setLightboxPhoto(photo);
+                                        }
+                                    }}
+                                    aria-label={`Bekijk ${photo.fileName}`}
+                                    type="button"
                                     onMouseEnter={(e) => {
                                         const overlay = e.currentTarget.querySelector('.image-overlay') as HTMLElement;
                                         if (overlay) overlay.style.opacity = '1';
@@ -535,7 +552,7 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                                     <div className="image-overlay" style={styles.imageOverlay}>
                                         <i className="bi bi-arrows-fullscreen" style={{fontSize: '2rem', color: 'white'}}></i>
                                     </div>
-                                </div>
+                                </button>
 
                                 <div style={styles.metadata}>
                                     <div style={styles.photoHeader}>
@@ -662,8 +679,23 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
             ))}
 
             {lightboxPhoto && (
-                <div style={styles.lightboxOverlay} onClick={() => setLightboxPhoto(null)}>
-                    <div style={styles.lightboxContent} onClick={(e) => e.stopPropagation()}>
+                <button
+                    style={styles.lightboxOverlay}
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget) {
+                            setLightboxPhoto(null);
+                        }
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setLightboxPhoto(null);
+                        }
+                    }}
+                    aria-label="Sluit lightbox"
+                    type="button"
+                >
+                    <div style={styles.lightboxContent}>
                         <button
                             style={styles.lightboxClose}
                             onClick={() => setLightboxPhoto(null)}
@@ -693,7 +725,7 @@ export default function PhotoGallery({ refreshTrigger }: PhotoGalleryProps) {
                             )}
                         </div>
                     </div>
-                </div>
+                </button>
             )}
         </>
     );
@@ -867,6 +899,9 @@ const styles: { [key: string]: React.CSSProperties } = {
         left: '10px',
         zIndex: 10,
         cursor: 'pointer',
+        backgroundColor: 'transparent',
+        border: 'none',
+        padding: 0,
     },
     checkbox: {
         width: '24px',
@@ -880,6 +915,9 @@ const styles: { [key: string]: React.CSSProperties } = {
         backgroundColor: '#1a2332',
         position: 'relative',
         cursor: 'pointer',
+        border: 'none',
+        padding: 0,
+        display: 'block',
     },
     imageOverlay: {
         position: 'absolute',
@@ -990,8 +1028,12 @@ const styles: { [key: string]: React.CSSProperties } = {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        zIndex: 9999,
-        padding: '2rem',
+        zIndex: 1000,
+        cursor: 'pointer',
+        border: 'none',
+        padding: 0,
+        width: '100%',
+        height: '100%',
     },
     lightboxContent: {
         position: 'relative',
@@ -1001,6 +1043,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         flexDirection: 'column',
         alignItems: 'center',
         gap: '1rem',
+        pointerEvents: 'auto',
     },
     lightboxImage: {
         maxWidth: '100%',

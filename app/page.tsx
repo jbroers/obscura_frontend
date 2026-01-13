@@ -103,7 +103,7 @@ export default function App() {
             <section style={styles.limitationsSection}>
                 <div style={styles.limitationsContainer}>
                     <h2 style={styles.limitationsTitle}>
-                        <i className="bi bi-exclamation-triangle" style={styles.warningIcon}></i>
+                        <i className="bi bi-exclamation-triangle" style={styles.warningIcon}></i>{' '}
                         Belangrijk om te weten
                     </h2>
                     <div style={styles.limitationsContent}>
@@ -166,7 +166,11 @@ export default function App() {
     );
 }
 
-function FeatureCard({ iconClass, title, description }: { iconClass: string; title: string; description: string }) {
+function FeatureCard({ iconClass, title, description }: Readonly<{
+    iconClass: string;
+    title: string;
+    description: string
+}>) {
     return (
         <div style={styles.featureCard}>
             <i className={`bi ${iconClass}`} style={styles.featureIcon}></i>
