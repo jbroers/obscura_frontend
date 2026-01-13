@@ -102,7 +102,7 @@ export default function StatisticsPage() {
         <>
             <div style={styles.container}>
                 <h1 style={styles.title}>
-                    <i className="bi bi-bar-chart-fill" style={styles.titleIcon}></i>
+                    <i className="bi bi-bar-chart-fill" style={styles.titleIcon}></i>{' '}
                     Foto Statistieken
                 </h1>
 
